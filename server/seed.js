@@ -1,5 +1,11 @@
 ﻿const sqlite3 = require('sqlite3');
 const path = require('path');
+const pino = require('pino');
+
+const logger = pino({
+  level: 'info',
+  transport: { target: 'pino/file', options: { destination: 1 } },
+});
 
 const dbPath = process.env.DB_PATH || path.resolve(__dirname, 'data/barbermanager.db');
 const db = new sqlite3.Database(dbPath);
@@ -30,11 +36,13 @@ function all(sql, params = []) {
 }
 
 const SQL = {
-  clientes: 'CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, telefone TEXT, email TEXT);',
-  funcionarios: 'CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, telefone TEXT, especialidade TEXT, status TEXT CHECK(status IN (\'ativo\',\'inativo\')) NOT NULL DEFAULT \'ativo\', email TEXT, senha_hash TEXT, imagem TEXT);',
+  clientes: 'CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, telefone TEXT, email TEXT, senha_hash TEXT, observacao_admin TEXT);',
+  funcionarios: 'CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, telefone TEXT, especialidade TEXT, status TEXT CHECK(status IN (\'ativo\',\'inativo\')) NOT NULL DEFAULT \'ativo\', email TEXT, senha_hash TEXT, imagem TEXT, comissao_tipo TEXT CHECK(comissao_tipo IN (\'percentual\',\'fixo\')) DEFAULT \'percentual\', comissao_valor NUMERIC DEFAULT 0);',
   servicos: 'CREATE TABLE IF NOT EXISTS servicos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, valor NUMERIC NOT NULL, duracao_min INTEGER NOT NULL, imagem TEXT);',
-  agendamentos: 'CREATE TABLE IF NOT EXISTS agendamentos (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER NOT NULL, funcionario_id INTEGER NOT NULL, servico_id INTEGER NOT NULL, data TEXT NOT NULL, hora TEXT NOT NULL, status TEXT CHECK(status IN (\'confirmado\',\'cancelado\',\'concluido\')) NOT NULL DEFAULT \'confirmado\', FOREIGN KEY (cliente_id) REFERENCES clientes(id), FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id), FOREIGN KEY (servico_id) REFERENCES servicos(id));',
-  historico: 'CREATE TABLE IF NOT EXISTS historico (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER NOT NULL, funcionario_id INTEGER NOT NULL, servico_id INTEGER NOT NULL, data TEXT NOT NULL, valor NUMERIC NOT NULL, FOREIGN KEY (cliente_id) REFERENCES clientes(id), FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id), FOREIGN KEY (servico_id) REFERENCES servicos(id));'
+  agendamentos: 'CREATE TABLE IF NOT EXISTS agendamentos (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER NOT NULL, funcionario_id INTEGER NOT NULL, servico_id INTEGER NOT NULL, data TEXT NOT NULL, hora TEXT NOT NULL, status TEXT CHECK(status IN (\'confirmado\',\'cancelado\',\'concluido\')) NOT NULL DEFAULT \'confirmado\', observacao TEXT, FOREIGN KEY (cliente_id) REFERENCES clientes(id), FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id), FOREIGN KEY (servico_id) REFERENCES servicos(id));',
+  historico: 'CREATE TABLE IF NOT EXISTS historico (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente_id INTEGER NOT NULL, funcionario_id INTEGER NOT NULL, servico_id INTEGER NOT NULL, data TEXT NOT NULL, valor NUMERIC NOT NULL, comissao NUMERIC, FOREIGN KEY (cliente_id) REFERENCES clientes(id), FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id), FOREIGN KEY (servico_id) REFERENCES servicos(id));',
+  expediente: 'CREATE TABLE IF NOT EXISTS expediente (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, dia_semana INTEGER NOT NULL CHECK(dia_semana BETWEEN 0 AND 6), inicio TEXT NOT NULL, fim TEXT NOT NULL, pausa_inicio TEXT, pausa_fim TEXT, FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id));',
+  folgas: 'CREATE TABLE IF NOT EXISTS folgas (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, data TEXT NOT NULL, motivo TEXT, FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id));'
 };
 
 async function ensureColumns() {
@@ -45,6 +53,28 @@ async function ensureColumns() {
   const colsS = await all("PRAGMA table_info(servicos)");
   if (!colsS.find((c) => c.name === 'imagem')) {
     await run('ALTER TABLE servicos ADD COLUMN imagem TEXT');
+  }
+  const colsA = await all("PRAGMA table_info(agendamentos)");
+  if (!colsA.find((c) => c.name === 'observacao')) {
+    await run('ALTER TABLE agendamentos ADD COLUMN observacao TEXT');
+  }
+  const colsC = await all("PRAGMA table_info(clientes)");
+  if (!colsC.find((c) => c.name === 'senha_hash')) {
+    await run('ALTER TABLE clientes ADD COLUMN senha_hash TEXT');
+  }
+  if (!colsC.find((c) => c.name === 'observacao_admin')) {
+    await run('ALTER TABLE clientes ADD COLUMN observacao_admin TEXT');
+  }
+  const colsF = await all("PRAGMA table_info(funcionarios)");
+  if (!colsF.find((c) => c.name === 'comissao_tipo')) {
+    await run('ALTER TABLE funcionarios ADD COLUMN comissao_tipo TEXT DEFAULT "percentual"');
+  }
+  if (!colsF.find((c) => c.name === 'comissao_valor')) {
+    await run('ALTER TABLE funcionarios ADD COLUMN comissao_valor NUMERIC DEFAULT 0');
+  }
+  const colsH = await all("PRAGMA table_info(historico)");
+  if (!colsH.find((c) => c.name === 'comissao')) {
+    await run('ALTER TABLE historico ADD COLUMN comissao NUMERIC');
   }
 }
 
@@ -71,6 +101,8 @@ const SERVICOS_SEED = [
     await run(SQL.servicos);
     await run(SQL.agendamentos);
     await run(SQL.historico);
+    await run(SQL.expediente);
+    await run(SQL.folgas);
     await ensureColumns();
 
     const clientesCount = (await get('SELECT COUNT(*) as c FROM clientes')).c;
@@ -130,7 +162,7 @@ const SERVICOS_SEED = [
       await run('INSERT INTO historico (cliente_id, funcionario_id, servico_id, data, valor) VALUES (2, 2, 2, ?, 35)', ['2026-06-14']);
     }
 
-    console.log('Seed concluido.');
+    logger.info('Seed concluido.');
     process.exit(0);
   } catch (err) {
     console.error('Falha no seed:', err);

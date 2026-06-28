@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
     const rows = await req.db.all(sql, params);
     res.json(rows);
   } catch (err) {
-    console.error('GET /agendamentos error:', err);
+    req.log.error('GET /agendamentos error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -38,22 +38,23 @@ router.post(
     body('servico_id').isInt().withMessage('servico_id required'),
     body('data').matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('data no formato YYYY-MM-DD'),
     body('hora').matches(/^\d{2}:\d{2}$/).withMessage('hora no formato HH:MM'),
+    body('observacao').optional().isString(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-    const { cliente_id, funcionario_id, servico_id, data, hora } = req.body;
+    const { cliente_id, funcionario_id, servico_id, data, hora, observacao } = req.body;
     try {
       const free = await isSlotAvailable(req.db, funcionario_id, data, hora);
       if (!free) return res.status(409).json({ message: 'Horário já ocupado para este funcionário' });
       const result = await req.db.run(
-        'INSERT INTO agendamentos (cliente_id, funcionario_id, servico_id, data, hora) VALUES (?, ?, ?, ?, ?)',
-        [cliente_id, funcionario_id, servico_id, data, hora]
+        'INSERT INTO agendamentos (cliente_id, funcionario_id, servico_id, data, hora, observacao) VALUES (?, ?, ?, ?, ?, ?)',
+        [cliente_id, funcionario_id, servico_id, data, hora, observacao || null]
       );
       const novo = await req.db.get('SELECT * FROM agendamentos WHERE id = ?', [result.id]);
       res.status(201).json(novo);
     } catch (err) {
-      console.error('POST /agendamentos error:', err);
+      req.log.error('POST /agendamentos error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   }
@@ -70,12 +71,13 @@ router.put(
     body('data').optional().matches(/^\d{4}-\d{2}-\d{2}$/),
     body('hora').optional().matches(/^\d{2}:\d{2}$/),
     body('status').optional().isIn(['confirmado', 'cancelado', 'concluido']),
+    body('observacao').optional().isString(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const id = parseInt(req.params.id, 10);
-    const { cliente_id, funcionario_id, servico_id, data, hora, status } = req.body;
+    const { cliente_id, funcionario_id, servico_id, data, hora, status, observacao } = req.body;
     try {
       // Load current record to check constraints if needed
       const current = await req.db.get('SELECT * FROM agendamentos WHERE id = ?', [id]);
@@ -98,6 +100,7 @@ router.put(
       if (data !== undefined) { fields.push('data = ?'); values.push(data); }
       if (hora !== undefined) { fields.push('hora = ?'); values.push(hora); }
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
+      if (observacao !== undefined) { fields.push('observacao = ?'); values.push(observacao); }
       if (fields.length === 0) return res.status(400).json({ message: 'Nenhum campo para atualizar' });
       values.push(id);
       const sql = `UPDATE agendamentos SET ${fields.join(', ')} WHERE id = ?`;
@@ -105,7 +108,7 @@ router.put(
       const updated = await req.db.get('SELECT * FROM agendamentos WHERE id = ?', [id]);
       res.json(updated);
     } catch (err) {
-      console.error('PUT /agendamentos/:id error:', err);
+      req.log.error('PUT /agendamentos/:id error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   }
@@ -120,7 +123,7 @@ router.delete('/:id', param('id').isInt(), async (req, res) => {
     await req.db.run('UPDATE agendamentos SET status = "cancelado" WHERE id = ?', [id]);
     res.json({ message: 'Agendamento cancelado' });
   } catch (err) {
-    console.error('DELETE /agendamentos/:id error:', err);
+    req.log.error('DELETE /agendamentos/:id error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

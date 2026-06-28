@@ -1,17 +1,22 @@
 // src/utils/db.js
 const sqlite3 = require('sqlite3');
 const path = require('path');
+const pino = require('pino');
 require('dotenv').config();
 
-// Resolve DB path relative to project root
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  transport: { target: 'pino/file', options: { destination: 1 } },
+});
+
 const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../../data/barbermanager.db');
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Failed to open SQLite DB:', err.message);
+    logger.error({ err }, 'Failed to open SQLite DB');
     process.exit(1);
   }
-  console.log('Connected to SQLite DB at', dbPath);
+  logger.info('Connected to SQLite DB at %s', dbPath);
 });
 
 // Promisify common methods (run, get, all)

@@ -1,6 +1,34 @@
+import { useEffect, useState } from 'react';
 import { Outlet, Link } from 'react-router-dom';
 
+const API = import.meta.env.VITE_API_URL;
+
+function getInitialTheme(): boolean {
+  const stored = localStorage.getItem('vg-theme');
+  if (stored === 'dark') return true;
+  if (stored === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
 function VisagioLayout() {
+  const [cliente, setCliente] = useState<{ nome: string } | null>(null);
+  const [dark, setDark] = useState(getInitialTheme);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('vg-theme', dark ? 'dark' : 'light');
+  }, [dark]);
+
+  useEffect(() => {
+    fetch(API + '/api/auth/cliente/me', { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.authenticated) setCliente(data);
+        else setCliente(null);
+      })
+      .catch(() => setCliente(null));
+  }, []);
+
   return (
     <>
       <header className="vg-topbar">
@@ -20,10 +48,25 @@ function VisagioLayout() {
           </Link>
 
           <nav className="vg-topbar__nav" aria-label="Acoes da vitrine">
-            <a className="vg-topbar__link" href="#cortes">Cortes</a>
-            <a className="vg-topbar__link" href="#equipe">Equipe</a>
-            <a className="vg-topbar__link" href="#agendar">Agendar</a>
-            <a className="vg-topbar__cta" href="#agendar">Reservar horario</a>
+            <a className="vg-topbar__link" href="/#cortes">Cortes</a>
+            <a className="vg-topbar__link" href="/#equipe">Equipe</a>
+            <a className="vg-topbar__link" href="/#agendar">Agendar</a>
+            {cliente ? (
+              <Link className="vg-topbar__link vg-topbar__link--user" to="/minha-conta/agendamentos">
+                {cliente.nome}
+              </Link>
+            ) : (
+              <Link className="vg-topbar__link" to="/minha-conta">Minha conta</Link>
+            )}
+            <button
+              className="vg-theme-toggle"
+              type="button"
+              aria-label={dark ? 'Modo claro' : 'Modo escuro'}
+              onClick={() => setDark(d => !d)}
+            >
+              {dark ? '\u2600' : '\u263E'}
+            </button>
+            <a className="vg-topbar__cta" href="/#agendar">Reservar horario</a>
           </nav>
         </div>
       </header>

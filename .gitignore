@@ -23,5 +23,6 @@ server/.env
 desktop.ini
 Thumbs.db
 
-# Vite cache
-vite.config.ts
+# Backup files
+server/backups/*.db
+!server/backups/.gitkeep

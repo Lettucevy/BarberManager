@@ -40,7 +40,7 @@ router.post(
       req.session.role = 'funcionario'; // could be extended
       return res.json({ message: 'Logged in' });
     } catch (err) {
-      console.error('Login error:', err);
+      req.log.error('Login error:', err);
       return res.status(500).json({ message: 'Server error' });
     }
   }
@@ -52,7 +52,7 @@ router.post(
 router.post('/logout', (req, res) => {
   req.session.destroy((err) => {
     if (err) {
-      console.error('Logout error:', err);
+      req.log.error('Logout error:', err);
       return res.status(500).json({ message: 'Logout failed' });
     }
     res.clearCookie('connect.sid');

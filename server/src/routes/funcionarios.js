@@ -3,7 +3,7 @@ const { body, param, validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const router = express.Router();
 
-const SELECT_FIELDS = 'id, nome, telefone, especialidade, status, imagem';
+const SELECT_FIELDS = 'id, nome, telefone, especialidade, status, imagem, comissao_tipo, comissao_valor';
 
 router.get('/', async (req, res) => {
   const q = req.query.q ? '%' + req.query.q + '%' : null;
@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
     const rows = await req.db.all('SELECT ' + SELECT_FIELDS + ' FROM funcionarios');
     res.json(rows);
   } catch (err) {
-    console.error('GET /funcionarios error:', err);
+    req.log.error('GET /funcionarios error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -32,7 +32,7 @@ router.get('/:id', param('id').isInt(), async (req, res) => {
     if (!row) return res.status(404).json({ message: 'Funcionario nao encontrado' });
     res.json(row);
   } catch (err) {
-    console.error('GET /funcionarios/:id error:', err);
+    req.log.error('GET /funcionarios/:id error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -47,21 +47,23 @@ router.post(
     body('email').optional().isEmail(),
     body('senha').optional().isLength({ min: 4 }).withMessage('Senha muito curta'),
     body('imagem').optional().isURL().withMessage('imagem deve ser uma URL valida'),
+    body('comissao_tipo').optional().isIn(['percentual', 'fixo']),
+    body('comissao_valor').optional().isFloat({ min: 0 }),
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-    const { nome, telefone, especialidade, status = 'ativo', email, senha, imagem } = req.body;
+    const { nome, telefone, especialidade, status = 'ativo', email, senha, imagem, comissao_tipo, comissao_valor } = req.body;
     try {
       const hash = senha ? await bcrypt.hash(senha, 10) : null;
       const result = await req.db.run(
-        'INSERT INTO funcionarios (nome, telefone, especialidade, status, email, senha_hash, imagem) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [nome, telefone || null, especialidade || null, status, email || null, hash, imagem || null]
+        'INSERT INTO funcionarios (nome, telefone, especialidade, status, email, senha_hash, imagem, comissao_tipo, comissao_valor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [nome, telefone || null, especialidade || null, status, email || null, hash, imagem || null, comissao_tipo || 'percentual', comissao_valor ?? 0]
       );
       const novo = await req.db.get('SELECT ' + SELECT_FIELDS + ' FROM funcionarios WHERE id = ?', [result.id]);
       res.status(201).json(novo);
     } catch (err) {
-      console.error('POST /funcionarios error:', err);
+      req.log.error('POST /funcionarios error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   }
@@ -78,12 +80,14 @@ router.put(
     body('email').optional().isEmail(),
     body('senha').optional().isLength({ min: 4 }),
     body('imagem').optional().isURL(),
+    body('comissao_tipo').optional().isIn(['percentual', 'fixo']),
+    body('comissao_valor').optional().isFloat({ min: 0 }),
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const id = parseInt(req.params.id, 10);
-    const { nome, telefone, especialidade, status, email, senha, imagem } = req.body;
+    const { nome, telefone, especialidade, status, email, senha, imagem, comissao_tipo, comissao_valor } = req.body;
     try {
       const fields = [];
       const values = [];
@@ -93,6 +97,8 @@ router.put(
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
       if (email !== undefined) { fields.push('email = ?'); values.push(email); }
       if (imagem !== undefined) { fields.push('imagem = ?'); values.push(imagem); }
+      if (comissao_tipo !== undefined) { fields.push('comissao_tipo = ?'); values.push(comissao_tipo); }
+      if (comissao_valor !== undefined) { fields.push('comissao_valor = ?'); values.push(comissao_valor); }
       if (senha !== undefined) {
         const hash = await bcrypt.hash(senha, 10);
         fields.push('senha_hash = ?');
@@ -105,7 +111,7 @@ router.put(
       const updated = await req.db.get('SELECT ' + SELECT_FIELDS + ' FROM funcionarios WHERE id = ?', [id]);
       res.json(updated);
     } catch (err) {
-      console.error('PUT /funcionarios/:id error:', err);
+      req.log.error('PUT /funcionarios/:id error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   }
@@ -119,7 +125,7 @@ router.delete('/:id', param('id').isInt(), async (req, res) => {
     await req.db.run('DELETE FROM funcionarios WHERE id = ?', [id]);
     res.json({ message: 'Funcionario removido' });
   } catch (err) {
-    console.error('DELETE /funcionarios/:id error:', err);
+    req.log.error('DELETE /funcionarios/:id error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

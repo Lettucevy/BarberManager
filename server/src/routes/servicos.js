@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
     const rows = await req.db.all('SELECT ' + SELECT_FIELDS + ' FROM servicos');
     res.json(rows);
   } catch (err) {
-    console.error('GET /servicos error:', err);
+    req.log.error('GET /servicos error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -28,7 +28,7 @@ router.get('/:id', param('id').isInt(), async (req, res) => {
     if (!row) return res.status(404).json({ message: 'Servico nao encontrado' });
     res.json(row);
   } catch (err) {
-    console.error('GET /servicos/:id error:', err);
+    req.log.error('GET /servicos/:id error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -53,7 +53,7 @@ router.post(
       const novo = await req.db.get('SELECT ' + SELECT_FIELDS + ' FROM servicos WHERE id = ?', [result.id]);
       res.status(201).json(novo);
     } catch (err) {
-      console.error('POST /servicos error:', err);
+      req.log.error('POST /servicos error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   }
@@ -87,7 +87,7 @@ router.put(
       const updated = await req.db.get('SELECT ' + SELECT_FIELDS + ' FROM servicos WHERE id = ?', [id]);
       res.json(updated);
     } catch (err) {
-      console.error('PUT /servicos/:id error:', err);
+      req.log.error('PUT /servicos/:id error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   }
@@ -101,7 +101,7 @@ router.delete('/:id', param('id').isInt(), async (req, res) => {
     await req.db.run('DELETE FROM servicos WHERE id = ?', [id]);
     res.json({ message: 'Servico removido' });
   } catch (err) {
-    console.error('DELETE /servicos/:id error:', err);
+    req.log.error('DELETE /servicos/:id error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

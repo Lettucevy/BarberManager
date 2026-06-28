@@ -24,6 +24,13 @@ interface Agendamento {
   status: string;
 }
 
+interface ClienteSessao {
+  authenticated: boolean;
+  id?: number;
+  nome?: string;
+  telefone?: string;
+}
+
 const API = import.meta.env.VITE_API_URL;
 const HORARIOS = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30'];
 
@@ -45,6 +52,7 @@ function todayIso(): string {
 }
 
 function ClienteAgendamento() {
+  const [cliente, setCliente] = useState<ClienteSessao | null>(null);
   const [servicos, setServicos] = useState<Servico[]>([]);
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
   const [busca, setBusca] = useState('');
@@ -56,25 +64,29 @@ function ClienteAgendamento() {
   const [telefone, setTelefone] = useState('');
   const [email, setEmail] = useState('');
   const [observacao, setObservacao] = useState('');
-  const [status, setStatus] = useState<{ tipo: 'ok' | 'erro'; mensagem: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ tipo: 'ok' | 'erro'; mensagem: string } | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [agendamentosDia, setAgendamentosDia] = useState<Agendamento[]>([]);
-  const [passo, setPasso] = useState<1 | 2 | 3 | 4>(1);
+  const [passo, setPasso] = useState<1 | 2 | 3>(1);
+
+  const logado = cliente?.authenticated && cliente?.id;
 
   useEffect(() => {
     const carregar = async () => {
       try {
-        const [sRes, fRes] = await Promise.all([
+        const [sRes, fRes, aRes] = await Promise.all([
           fetch(API + '/api/servicos', { credentials: 'include' }),
           fetch(API + '/api/funcionarios', { credentials: 'include' }),
+          fetch(API + '/api/auth/cliente/me', { credentials: 'include' }),
         ]);
-        const [sData, fData] = await Promise.all([sRes.json(), fRes.json()]);
+        const [sData, fData, aData] = await Promise.all([sRes.json(), fRes.json(), aRes.json()]);
         setServicos(Array.isArray(sData) ? sData : []);
         const ativos = Array.isArray(fData) ? fData.filter((f: Funcionario) => f.status !== 'inativo') : [];
         setFuncionarios(ativos);
+        setCliente(aData);
       } catch (err) {
         console.error('Erro ao carregar dados', err);
-        setStatus({ tipo: 'erro', mensagem: 'Nao conseguimos carregar os servicos. Tente novamente.' });
+        setStatusMsg({ tipo: 'erro', mensagem: 'Nao conseguimos carregar os servicos. Tente novamente.' });
       }
     };
     carregar();
@@ -115,47 +127,64 @@ function ClienteAgendamento() {
 
   const submeter = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatus(null);
-    if (!servicoId || !funcionarioId || !data || !hora || !nome || !telefone) {
-      setStatus({ tipo: 'erro', mensagem: 'Preencha todos os campos obrigatorios.' });
+    setStatusMsg(null);
+
+    if (!servicoId || !funcionarioId || !data || !hora) {
+      setStatusMsg({ tipo: 'erro', mensagem: 'Selecione servico, profissional, data e horario.' });
       return;
     }
+    if (!logado && (!nome || !telefone)) {
+      setStatusMsg({ tipo: 'erro', mensagem: 'Preencha nome e telefone.' });
+      return;
+    }
+
     setEnviando(true);
     try {
-      const clienteRes = await fetch(API + '/api/clientes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ nome: nome, telefone: telefone, email: email || undefined }),
-      });
-      if (!clienteRes.ok) {
-        const err = await clienteRes.json().catch(() => ({}));
-        throw new Error(err.message || 'Nao foi possivel registrar seus dados.');
+      let clienteId: number;
+
+      if (logado) {
+        clienteId = cliente!.id!;
+      } else {
+        const clienteRes = await fetch(API + '/api/clientes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ nome, telefone, email: email || undefined }),
+        });
+        if (!clienteRes.ok) {
+          const err = await clienteRes.json().catch(() => ({}));
+          throw new Error(err.message || 'Nao foi possivel registrar seus dados.');
+        }
+        const novoCliente = await clienteRes.json();
+        clienteId = novoCliente.id;
       }
-      const cliente = await clienteRes.json();
 
       const agendamentoRes = await fetch(API + '/api/agendamentos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          cliente_id: cliente.id,
+          cliente_id: clienteId,
           funcionario_id: funcionarioId,
           servico_id: servicoId,
           data: data,
           hora: hora,
+          observacao: observacao || undefined,
         }),
       });
       if (!agendamentoRes.ok) {
         const err = await agendamentoRes.json().catch(() => ({}));
         throw new Error(err.message || 'Horario indisponivel.');
       }
-      setStatus({ tipo: 'ok', mensagem: 'Tudo certo, ' + nome.split(' ')[0] + '! Sua reserva foi confirmada.' });
-      setNome(''); setTelefone(''); setEmail(''); setObservacao('');
+
+      const nomeCliente = logado ? cliente!.nome : nome;
+      setStatusMsg({ tipo: 'ok', mensagem: 'Tudo certo, ' + (nomeCliente?.split(' ')[0] || '') + '! Sua reserva foi confirmada.' });
+      setObservacao('');
       setServicoId(''); setFuncionarioId(''); setData(''); setHora('');
+      setNome(''); setTelefone(''); setEmail('');
       setPasso(1);
     } catch (err) {
-      setStatus({ tipo: 'erro', mensagem: err instanceof Error ? err.message : 'Falha ao enviar.' });
+      setStatusMsg({ tipo: 'erro', mensagem: err instanceof Error ? err.message : 'Falha ao enviar.' });
     } finally {
       setEnviando(false);
     }
@@ -171,7 +200,7 @@ function ClienteAgendamento() {
     setPasso(3);
   };
 
-  const alertClass = status ? 'alert ' + (status.tipo === 'ok' ? 'alert-success' : 'alert-danger') + ' vg-alert' : '';
+  const alertClass = statusMsg ? 'alert ' + (statusMsg.tipo === 'ok' ? 'alert-success' : 'alert-danger') + ' vg-alert' : '';
   const serviceClass = (id: number) => 'vg-service' + (servicoId === id ? ' is-selected' : '');
   const barberClass = (id: number) => 'vg-barber' + (funcionarioId === id ? ' is-selected' : '');
   const slotClass = (_h: string, ocupado: boolean, selecionado: boolean) =>
@@ -191,7 +220,7 @@ function ClienteAgendamento() {
             <span><strong>1</strong> escolha o servico</span>
             <span><strong>2</strong> escolha o profissional</span>
             <span><strong>3</strong> escolha o horario</span>
-            <span><strong>4</strong> confirme seus dados</span>
+            {!logado && <span><strong>4</strong> confirme seus dados</span>}
           </div>
         </div>
       </section>
@@ -206,14 +235,16 @@ function ClienteAgendamento() {
         <li className={passo >= 3 ? 'is-active' : ''} data-state={data && hora ? 'done' : passo === 3 ? 'current' : 'todo'}>
           <span className="vg-steps__dot">3</span>Data e horario
         </li>
-        <li className={passo >= 4 ? 'is-active' : ''} data-state={passo === 4 ? 'current' : 'todo'}>
-          <span className="vg-steps__dot">4</span>Seus dados
-        </li>
+        {!logado && (
+          <li className={passo >= 3 ? 'is-active' : ''} data-state={passo === 3 && data && hora ? 'current' : 'todo'}>
+            <span className="vg-steps__dot">4</span>Seus dados
+          </li>
+        )}
       </ol>
 
-      {status && (
+      {statusMsg && (
         <div className={alertClass}>
-          {status.mensagem}
+          {statusMsg.mensagem}
         </div>
       )}
 
@@ -298,7 +329,7 @@ function ClienteAgendamento() {
                 className="form-control"
                 min={todayIso()}
                 value={data}
-                onChange={(e) => { setData(e.target.value); setHora(''); setPasso(3); }}
+                onChange={(e) => { setData(e.target.value); setHora(''); }}
               />
             </label>
             <div className="vg-slots">
@@ -315,7 +346,7 @@ function ClienteAgendamento() {
                         type="button"
                         key={h}
                         className={slotClass(h, ocupado, selecionado)}
-                        onClick={() => { if (!ocupado) { setHora(h); setPasso(4); } }}
+                        onClick={() => { if (!ocupado) setHora(h); }}
                         disabled={ocupado}
                       >
                         {h}
@@ -328,56 +359,54 @@ function ClienteAgendamento() {
           </div>
         </section>
 
-        <section className="vg-step-card">
-          <header>
-            <h2 className="vg-step-card__title">4. Seus dados</h2>
-            <p className="vg-step-card__sub">Para confirmar o agendamento, preencha seus dados de contato.</p>
-          </header>
-          <div className="vg-fields">
-            <label className="vg-field">
-              <span>Nome completo*</span>
-              <input
-                type="text"
-                className="form-control"
-                required
-                value={nome}
-                onChange={(e) => setNome(e.target.value)}
-                placeholder="Como podemos te chamar?"
-              />
-            </label>
-            <label className="vg-field">
-              <span>Telefone*</span>
-              <input
-                type="tel"
-                className="form-control"
-                required
-                value={telefone}
-                onChange={(e) => setTelefone(e.target.value)}
-                placeholder="(11) 99999-0000"
-              />
-            </label>
-            <label className="vg-field">
-              <span>Email</span>
-              <input
-                type="email"
-                className="form-control"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="opcional"
-              />
-            </label>
-            <label className="vg-field vg-field--full">
-              <span>Observacao</span>
-              <textarea
-                className="form-control"
-                rows={2}
-                value={observacao}
-                onChange={(e) => setObservacao(e.target.value)}
-                placeholder="Algo que o barbeiro precise saber?"
-              />
-            </label>
-          </div>
-        </section>
+        {!logado && (
+          <section className="vg-step-card">
+            <header>
+              <h2 className="vg-step-card__title">4. Seus dados</h2>
+              <p className="vg-step-card__sub">Para confirmar o agendamento, preencha seus dados de contato.</p>
+            </header>
+            <div className="vg-fields">
+              <label className="vg-field">
+                <span>Nome completo*</span>
+                <input type="text" className="form-control" required value={nome}
+                  onChange={(e) => setNome(e.target.value)} placeholder="Como podemos te chamar?" />
+              </label>
+              <label className="vg-field">
+                <span>Telefone*</span>
+                <input type="tel" className="form-control" required value={telefone}
+                  onChange={(e) => setTelefone(e.target.value)} placeholder="(11) 99999-0000" />
+              </label>
+              <label className="vg-field">
+                <span>Email</span>
+                <input type="email" className="form-control" value={email}
+                  onChange={(e) => setEmail(e.target.value)} placeholder="opcional" />
+              </label>
+              <label className="vg-field vg-field--full">
+                <span>Observacao</span>
+                <textarea className="form-control" rows={2} value={observacao}
+                  onChange={(e) => setObservacao(e.target.value)}
+                  placeholder="Algo que o barbeiro precise saber?" />
+              </label>
+            </div>
+          </section>
+        )}
+
+        {logado && (
+          <section className="vg-step-card">
+            <header>
+              <h2 className="vg-step-card__title">Confirmacao</h2>
+              <p className="vg-step-card__sub">Cliente: <strong>{cliente!.nome}</strong> &mdash; {cliente!.telefone}</p>
+            </header>
+            <div className="vg-fields">
+              <label className="vg-field vg-field--full">
+                <span>Observacao</span>
+                <textarea className="form-control" rows={2} value={observacao}
+                  onChange={(e) => setObservacao(e.target.value)}
+                  placeholder="Algo que o barbeiro precise saber?" />
+              </label>
+            </div>
+          </section>
+        )}
 
         <aside className="vg-summary">
           <h3 className="vg-summary__title">Resumo da reserva</h3>
@@ -406,9 +435,11 @@ function ClienteAgendamento() {
           <button type="submit" className="btn btn-dark btn-lg w-100" disabled={enviando}>
             {enviando ? 'Enviando...' : 'Confirmar reserva'}
           </button>
-          <p className="vg-summary__hint">
-            Ja e cliente? Use os mesmos dados para que a gente reconheca voce da proxima vez.
-          </p>
+          {!logado && (
+            <p className="vg-summary__hint">
+              Ja tem cadastro? <a href="/minha-conta">Faca login</a> para agendar mais rapido.
+            </p>
+          )}
         </aside>
       </form>
     </>
